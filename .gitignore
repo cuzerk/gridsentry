@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.env
+
+# macOS
+.DS_Store
+
+# Data/exports that may contain sensitive info
+backend/export.geojson
+backend/weather_snapshot.json
+
+# Claude
+.claude/
