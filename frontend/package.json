@@ -1,0 +1,23 @@
+{
+  "name": "gridsentry",
+  "version": "1.0.0",
+  "description": "US Transmission Lines Explorer",
+  "scripts": {
+    "start": "parcel index.html -p 8888",
+    "build": "parcel build index.html"
+  },
+  "dependencies": {
+    "@deck.gl/mapbox": "^8.9.36",
+    "deck.gl": "^8.9.36",
+    "mapbox-gl": "~3.12.0"
+  },
+  "devDependencies": {
+    "buffer": "^6.0.3",
+    "parcel": "~2.15.4",
+    "parcel-reporter-static-files-copy": "^1.5.3"
+  },
+  "staticFiles": {
+    "staticPath": "static",
+    "distDir": "dist"
+  }
+}

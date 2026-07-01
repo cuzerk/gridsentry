@@ -1,0 +1,361 @@
+@import 'npm:mapbox-gl/dist/mapbox-gl.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f0ece3;
+}
+
+/* ── Map ── */
+#map {
+  position: fixed;
+  inset: 0;
+  background: #f0ece3;
+}
+
+.maplibregl-canvas {
+  outline: 0;
+}
+
+.maplibregl-ctrl-group {
+  background-color: rgba(255, 255, 255, 0.85);
+  border-radius: 9999px;
+}
+
+@supports (backdrop-filter: blur(10px)) {
+  .maplibregl-ctrl-group {
+    background-color: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(10px) saturate(2);
+  }
+}
+
+.maplibregl-ctrl-group button {
+  width: 36px;
+  height: 36px;
+  opacity: 0.8;
+}
+
+.maplibregl-ctrl-group button.maplibregl-ctrl-compass {
+  display: none;
+}
+
+/* ── Panel ── */
+#panel {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  top: calc(12px + env(safe-area-inset-top));
+  left: calc(12px + env(safe-area-inset-left));
+  z-index: 1;
+  width: 190px;
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+}
+
+@supports (backdrop-filter: blur(12px)) {
+  #panel {
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(12px) saturate(2);
+  }
+}
+
+/* ── Logo ── */
+#logo h1 {
+  margin: 0 0 2px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1e293b;
+  letter-spacing: -0.01em;
+}
+
+#logo p {
+  margin: 0 0 14px;
+  font-size: 0.72rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Legend ── */
+#legend {
+  margin-bottom: 12px;
+}
+
+#legend h2 {
+  margin: 0 0 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+  font-size: 0.78rem;
+  color: #334155;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 1px 4px;
+  transition: background 0.15s;
+}
+
+.legend-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.legend-item.hidden {
+  opacity: 0.35;
+}
+
+.legend-swatch {
+  flex-shrink: 0;
+  width: 24px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* ── Stats ── */
+#stats {
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+/* ── Tooltip ── */
+#tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  pointer-events: none;
+  background: rgba(15, 23, 42, 0.9);
+  color: #f1f5f9;
+  border-radius: 10px;
+  padding: 9px 13px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.1s;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 320px;
+  white-space: normal;
+}
+
+@supports (backdrop-filter: blur(8px)) {
+  #tooltip {
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(8px);
+  }
+}
+
+#tooltip.show {
+  opacity: 1;
+}
+
+#tooltip strong {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+#tooltip span {
+  color: rgba(241, 245, 249, 0.65);
+  font-size: 0.75rem;
+}
+
+/* ── Radar animation bar ── */
+#radar-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(12px) saturate(2);
+  border-radius: 14px;
+  padding: 10px 18px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  color: #f1f5f9;
+  font-size: 0.78rem;
+  min-width: 480px;
+  max-width: 700px;
+  width: calc(100vw - 64px);
+}
+
+#radar-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+#radar-play {
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  color: #f1f5f9;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+#radar-play:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+#radar-storm {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+#radar-storm-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+#radar-timestamp {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #f8fafc;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+#radar-bar-center {
+  flex: 1;
+  min-width: 0;
+}
+
+#radar-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+#radar-opacity-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* Range input shared styles */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+  outline: none;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+input[type='range']::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+#radar-slider {
+  width: 100%;
+}
+
+#radar-opacity {
+  width: 80px;
+}
+
+/* ── Wind controls ── */
+#wind-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 4px;
+}
+
+#wind-toggle {
+  background: rgba(56, 189, 248, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #7dd3fc;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+#wind-toggle:hover {
+  background: rgba(56, 189, 248, 0.28);
+}
+
+#wind-toggle.off {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #64748b;
+}
+
+#wind-opacity-label {
+  display: flex;
+  align-items: center;
+}
+
+#wind-opacity {
+  width: 64px;
+}
+
+/* ── Wind speed legend entries ── */
+.wind-speed-swatch {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}

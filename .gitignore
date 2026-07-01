@@ -12,5 +12,16 @@ venv/
 backend/export.geojson
 backend/weather_snapshot.json
 
+# Generated data (re-created by agents/scripts)
+analysis/data/
+frontend/data/
+frontend/static/data/
+
+# Frontend build artifacts
+frontend/dist/
+frontend/.parcel-cache/
+frontend/node_modules/
+frontend/.env
+
 # Claude
 .claude/

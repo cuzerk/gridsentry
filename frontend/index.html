@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>GridSentry — US Transmission Lines</title>
+    <link rel="stylesheet" href="src/app.css" />
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="panel">
+      <div id="logo">
+        <h1>GridSentry</h1>
+        <p>US Transmission Lines</p>
+      </div>
+      <div id="legend"></div>
+      <div id="stats">Loading…</div>
+    </div>
+    <div id="tooltip"></div>
+
+    <div id="radar-bar">
+      <div id="radar-bar-left">
+        <button id="radar-play" title="Play / Pause">&#9654;</button>
+        <div id="radar-storm">
+          <span id="radar-storm-name">Oct 2019 Nor'easter</span>
+          <span id="radar-timestamp">Oct 16 15:00 UTC</span>
+        </div>
+      </div>
+      <div id="radar-bar-center">
+        <input type="range" id="radar-slider" min="0" max="60" value="0" step="1" />
+      </div>
+      <div id="radar-bar-right">
+        <button id="wind-toggle" title="Toggle wind layer" class="active">Wind</button>
+        <label id="wind-opacity-label">
+          <input type="range" id="wind-opacity" min="0" max="100" value="80" step="5" />
+        </label>
+      </div>
+    </div>
+
+    <script src="src/app.js" type="module"></script>
+  </body>
+</html>
