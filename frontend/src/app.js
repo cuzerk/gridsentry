@@ -1,6 +1,6 @@
 import mapboxgl from 'mapbox-gl';
 import {MapboxOverlay} from '@deck.gl/mapbox';
-import {IconLayer, PathLayer} from 'deck.gl';
+import {BitmapLayer, IconLayer, PathLayer} from 'deck.gl';
 import routes from '../../analysis/data/infrastructure/routes_from_api.json';
 import levels from '../../analysis/data/infrastructure/levels_from_api.json';
 
@@ -130,7 +130,7 @@ let windVisible      = true;
 let windFrameIdx     = 0;
 let windFeatures     = [];
 let windArrowFeatures = [];
-let windBitmapUrl    = null;
+let windCanvas       = null;
 let windBounds       = null;
 let deckOverlay      = null;
 
@@ -139,7 +139,7 @@ let PRECIP_FRAMES    = [];
 let precipCache      = {};
 let precipVisible    = true;
 let precipFrameIdx   = 0;
-let precipBitmapUrl  = null;
+let precipCanvas     = null;
 let precipBounds     = null;
 
 // ── Elevation state ───────────────────────────────────────────────────────────
@@ -235,7 +235,7 @@ function buildBitmapUrl(features) {
   ctx.putImageData(img, 0, 0);
 
   windBounds = [lons[0], lats[0], lons[nLon - 1], lats[nLat - 1]];
-  return canvas.toDataURL('image/png');
+  return canvas;
 }
 
 // ── Wind arrow layer (deck.gl — heatmap is now a Mapbox image source) ─────────
@@ -276,6 +276,30 @@ function buildArrowLayer(opacity) {
   ];
 }
 
+// ── Weather BitmapLayers (deck.gl — canvas passed directly, no async decode) ──
+function buildWeatherLayers() {
+  const layers = [];
+  const precipOp = Number($precipOpacity.value) / 100;
+  const windOp   = Number($windOpacity.value) / 100;
+  if (precipCanvas && precipBounds) {
+    layers.push(new BitmapLayer({
+      id: 'precip-bitmap',
+      image: precipCanvas,
+      bounds: precipBounds,
+      opacity: precipVisible ? precipOp * 0.80 : 0,
+    }));
+  }
+  if (windCanvas && windBounds) {
+    layers.push(new BitmapLayer({
+      id: 'wind-bitmap',
+      image: windCanvas,
+      bounds: windBounds,
+      opacity: windVisible ? windOp * 0.75 : 0,
+    }));
+  }
+  return layers;
+}
+
 // ── Transmission line deck.gl layers ─────────────────────────────────────────
 function buildRouteLayers() {
   return [
@@ -303,15 +327,10 @@ function buildRouteLayers() {
 }
 
 function buildAllLayers() {
-  return [...buildRouteLayers(), ...buildArrowLayer(Number($windOpacity.value) / 100)];
+  return [...buildWeatherLayers(), ...buildRouteLayers(), ...buildArrowLayer(Number($windOpacity.value) / 100)];
 }
 
 // ── Wind loading ──────────────────────────────────────────────────────────────
-function _imageCoords(bounds) {
-  const [w, s, e, n] = bounds;
-  return [[w, n], [e, n], [e, s], [w, s]];
-}
-
 async function loadWindFrame(idx) {
   if (!WIND_FRAMES.length) return;
   const frame = WIND_FRAMES[idx];
@@ -323,17 +342,8 @@ async function loadWindFrame(idx) {
   }
   windFeatures      = windCache[url].features;
   windArrowFeatures = windFeatures.filter((f) => f.properties.kind !== 'interp');
-  const dataUrl = buildBitmapUrl(windFeatures);  // also sets windBounds
-  if (dataUrl && windBounds && map.getSource('wind-image')) {
-    map.getSource('wind-image').updateImage({ url: dataUrl, coordinates: _imageCoords(windBounds) });
-    if (map.getLayer('wind-raster')) {
-      map.setPaintProperty('wind-raster', 'raster-opacity',
-        windVisible ? Number($windOpacity.value) / 100 * 0.75 : 0);
-    }
-  }
-  if (deckOverlay) {
-    deckOverlay.setProps({ layers: buildAllLayers() });
-  }
+  windCanvas = buildBitmapUrl(windFeatures);  // also sets windBounds; returns canvas element
+  if (deckOverlay) deckOverlay.setProps({ layers: buildAllLayers() });
 }
 
 async function loadWindManifest() {
@@ -421,7 +431,7 @@ function buildPrecipBitmapUrl(features) {
   ctx.putImageData(img, 0, 0);
 
   precipBounds = [lons[0], lats[0], lons[nLon - 1], lats[nLat - 1]];
-  return canvas.toDataURL('image/png');
+  return canvas;
 }
 
 async function loadPrecipFrame(idx) {
@@ -433,14 +443,8 @@ async function loadPrecipFrame(idx) {
     const resp = await fetch(url);
     precipCache[url] = await resp.json();
   }
-  const dataUrl = buildPrecipBitmapUrl(precipCache[url].features);  // sets precipBounds
-  if (dataUrl && precipBounds && map.getSource('precip-image')) {
-    map.getSource('precip-image').updateImage({ url: dataUrl, coordinates: _imageCoords(precipBounds) });
-    if (map.getLayer('precip-raster')) {
-      map.setPaintProperty('precip-raster', 'raster-opacity',
-        precipVisible ? Number($precipOpacity.value) / 100 * 0.80 : 0);
-    }
-  }
+  precipCanvas = buildPrecipBitmapUrl(precipCache[url].features);  // sets precipBounds; returns canvas element
+  if (deckOverlay) deckOverlay.setProps({ layers: buildAllLayers() });
 }
 
 async function loadPrecipManifest() {
@@ -486,6 +490,113 @@ function addWindLegend() {
   $legend.appendChild(section);
 }
 
+// ── Customers-out timeseries chart ───────────────────────────────────────────
+function drawCustomersChart(currentIdx) {
+  const canvas = document.getElementById('customers-chart');
+  if (!canvas || !OUTAGE_FRAMES.length) return;
+
+  const dpr  = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const cssW = rect.width, cssH = rect.height;
+  if (!cssW || !cssH) return;
+
+  if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+    canvas.width  = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+  }
+
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const PXL = 13 * dpr, PXR = 4 * dpr, PY = 3 * dpr;
+  const iW = W - PXL - PXR, iH = H - PY * 2;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const totals  = OUTAGE_FRAMES.map((f) => f.counties.reduce((s, c) => s + c.customers, 0));
+  const maxVal  = Math.max(...totals, 1);
+  const n       = totals.length;
+
+  const px = (i) => PXL + (i / (n - 1)) * iW;
+  const py = (v) => PY + iH - (v / maxVal) * iH * 0.88;
+
+  const cx = px(currentIdx);
+
+  // ── Y-axis label ──────────────────────────────────────────────────────────
+  ctx.save();
+  ctx.font = `${Math.round(7.5 * dpr)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.65)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.translate(Math.round(PXL * 0.42), PY + iH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('# customers', 0, 0);
+  ctx.restore();
+
+  // ── Future area (dim) ──────────────────────────────────────────────────────
+  if (currentIdx < n - 1) {
+    ctx.beginPath();
+    ctx.moveTo(cx, py(totals[currentIdx]));
+    for (let i = currentIdx + 1; i < n; i++) ctx.lineTo(px(i), py(totals[i]));
+    ctx.lineTo(px(n - 1), PY + iH);
+    ctx.lineTo(cx, PY + iH);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.12)';
+    ctx.fill();
+  }
+
+  // ── Past + current area (red gradient) ────────────────────────────────────
+  ctx.beginPath();
+  ctx.moveTo(PXL, PY + iH);
+  for (let i = 0; i <= currentIdx; i++) ctx.lineTo(px(i), py(totals[i]));
+  ctx.lineTo(cx, PY + iH);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, PY, 0, PY + iH);
+  grad.addColorStop(0, 'rgba(239, 68, 68, 0.65)');
+  grad.addColorStop(1, 'rgba(239, 68, 68, 0.08)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // ── Full line ──────────────────────────────────────────────────────────────
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    i === 0 ? ctx.moveTo(px(i), py(totals[i])) : ctx.lineTo(px(i), py(totals[i]));
+  }
+  ctx.strokeStyle = 'rgba(239, 68, 68, 0.9)';
+  ctx.lineWidth   = 1.5 * dpr;
+  ctx.lineJoin    = 'round';
+  ctx.stroke();
+
+  // ── Playhead ──────────────────────────────────────────────────────────────
+  ctx.beginPath();
+  ctx.moveTo(cx, PY);
+  ctx.lineTo(cx, PY + iH);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+  ctx.lineWidth   = 1 * dpr;
+  ctx.stroke();
+
+  // ── Count label above playhead ────────────────────────────────────────────
+  const countStr = totals[currentIdx].toLocaleString();
+  ctx.font = `600 ${Math.round(12 * dpr)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  const labelW = ctx.measureText(countStr).width;
+  const labelX = Math.max(PXL + labelW / 2 + 2 * dpr,
+                  Math.min(cx, W - PXR - labelW / 2 - 2 * dpr));
+  const labelY = PY + 7 * dpr;
+  ctx.fillStyle = 'rgba(248, 250, 252, 0.92)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(countStr, labelX, labelY);
+
+  // ── Current value dot ─────────────────────────────────────────────────────
+  ctx.beginPath();
+  ctx.arc(cx, py(totals[currentIdx]), 3 * dpr, 0, Math.PI * 2);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fill();
+}
+
+window.addEventListener('resize', () => {
+  if (OUTAGE_FRAMES.length) drawCustomersChart(outageFrameIdx);
+});
+
 // ── Outage loading & visualization ────────────────────────────────────────────
 function outageLineCount(customers, totalLines) {
   const maxCust = OUTAGE_DATA?.max_customers ?? 351202;
@@ -522,6 +633,7 @@ function applyOutageFrame(idx) {
   } else {
     $stats.textContent = `${routes.length.toLocaleString()} transmission lines · No active outages`;
   }
+  drawCustomersChart(idx);
 }
 
 async function loadOutageData() {
@@ -616,14 +728,7 @@ map.on('load', () => {
   loadPrecipManifest();
 
   function refreshLayers() {
-    const windOp   = Number($windOpacity.value) / 100;
-    const precipOp = Number($precipOpacity.value) / 100;
-    if (map.getLayer('wind-raster'))
-      map.setPaintProperty('wind-raster',   'raster-opacity', windVisible   ? windOp * 0.75   : 0);
-    if (map.getLayer('precip-raster'))
-      map.setPaintProperty('precip-raster', 'raster-opacity', precipVisible ? precipOp * 0.80 : 0);
-    if (deckOverlay)
-      deckOverlay.setProps({ layers: buildAllLayers() });
+    if (deckOverlay) deckOverlay.setProps({ layers: buildAllLayers() });
   }
 
   $windToggle.addEventListener('click', () => {
@@ -645,17 +750,6 @@ map.on('load', () => {
   });
 
   $precipOpacity.addEventListener('input', refreshLayers);
-
-  // ── Weather image sources (Mapbox-native, below deck.gl canvas) ───────────
-  const TRANSPARENT_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=';
-  const INIT_COORDS     = [[-80, 46], [-68, 46], [-68, 36], [-80, 36]];
-
-  const firstSymbolId = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
-
-  map.addSource('wind-image',   { type: 'image', url: TRANSPARENT_PNG, coordinates: INIT_COORDS });
-  map.addSource('precip-image', { type: 'image', url: TRANSPARENT_PNG, coordinates: INIT_COORDS });
-  map.addLayer({ id: 'wind-raster',   type: 'raster', source: 'wind-image',   paint: { 'raster-opacity': 0 } }, firstSymbolId);
-  map.addLayer({ id: 'precip-raster', type: 'raster', source: 'precip-image', paint: { 'raster-opacity': 0 } }, firstSymbolId);
 
   // Routes source — invisible hit target only; lines rendered by deck.gl PathLayer
   map.addSource('routes', {
@@ -744,4 +838,18 @@ map.on('load', () => {
     pause();
     advanceFrame(Number($slider.value));
   });
+
+  // Chart scrub: click or drag on the timeseries to jump to that time
+  const $chart = document.getElementById('customers-chart');
+  function chartScrub(e) {
+    if (!OUTAGE_FRAMES.length) return;
+    const rect = $chart.getBoundingClientRect();
+    const t    = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    pause();
+    advanceFrame(Math.round(t * (OUTAGE_FRAMES.length - 1)));
+  }
+  let chartDragging = false;
+  $chart.addEventListener('mousedown', (e) => { chartDragging = true; chartScrub(e); });
+  window.addEventListener('mousemove', (e) => { if (chartDragging) chartScrub(e); });
+  window.addEventListener('mouseup',   ()  => { chartDragging = false; });
 });

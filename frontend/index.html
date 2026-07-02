@@ -19,26 +19,31 @@
     <div id="tooltip"></div>
 
     <div id="radar-bar">
-      <div id="radar-bar-left">
-        <button id="radar-play" title="Play / Pause">&#9654;</button>
-        <div id="radar-storm">
-          <span id="radar-storm-name">Oct 2019 Nor'easter</span>
-          <span id="radar-timestamp">Oct 16 15:00 UTC</span>
+      <div id="chart-row">
+        <canvas id="customers-chart"></canvas>
+      </div>
+      <div id="controls-row">
+        <div id="radar-bar-left">
+          <button id="radar-play" title="Play / Pause">&#9654;</button>
+          <div id="radar-storm">
+            <span id="radar-storm-name">Oct 2019 Nor'easter</span>
+            <span id="radar-timestamp">Oct 16 15:00 UTC</span>
+          </div>
         </div>
-      </div>
-      <div id="radar-bar-center">
-        <input type="range" id="radar-slider" min="0" max="60" value="0" step="1" />
-      </div>
-      <div id="radar-bar-right">
-        <button id="wind-toggle" title="Toggle wind layer" class="active">Wind</button>
-        <label id="wind-opacity-label">
-          <input type="range" id="wind-opacity" min="0" max="100" value="80" step="5" />
-        </label>
-        <div class="layer-divider"></div>
-        <button id="precip-toggle" title="Toggle precipitation layer" class="active">Precip</button>
-        <label id="precip-opacity-label">
-          <input type="range" id="precip-opacity" min="0" max="100" value="85" step="5" />
-        </label>
+        <div id="radar-bar-center">
+          <input type="range" id="radar-slider" min="0" max="60" value="0" step="1" />
+        </div>
+        <div id="radar-bar-right">
+          <button id="wind-toggle" title="Toggle wind layer" class="active">Wind</button>
+          <label id="wind-opacity-label">
+            <input type="range" id="wind-opacity" min="0" max="100" value="80" step="5" />
+          </label>
+          <div class="layer-divider"></div>
+          <button id="precip-toggle" title="Toggle precipitation layer" class="active">Precip</button>
+          <label id="precip-opacity-label">
+            <input type="range" id="precip-opacity" min="0" max="100" value="85" step="5" />
+          </label>
+        </div>
       </div>
     </div>
 
