@@ -1,5 +1,5 @@
 """
-GridSentry — Predictive Grid Reliability Dashboard
+StormLines — Predictive Grid Reliability Dashboard
 Streamlit + pydeck  |  Feb 2026 New England Nor'easter
 
 Run:
@@ -20,7 +20,7 @@ import streamlit as st
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="GridSentry — Predictive Grid Reliability",
+    page_title="StormLines — Predictive Grid Reliability",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -107,7 +107,7 @@ if "playing" not in st.session_state:
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## ⚡ GridSentry")
+    st.markdown("## ⚡ StormLines")
     st.markdown("**Predictive Grid Maintenance**")
     st.markdown("*Southern New England — Feb 2026*")
     st.divider()
@@ -158,7 +158,7 @@ with st.sidebar:
     st.caption(f"Generated: {meta.get('generated_at','—')[:19]}")
 
 # ── TITLE ROW ─────────────────────────────────────────────────────────────────
-st.markdown("# ⚡ GridSentry — February 2026 Nor'easter")
+st.markdown("# ⚡ StormLines — February 2026 Nor'easter")
 st.markdown(
     "AI-driven predictive maintenance · Random Forest · "
     "Southern New England Power Grid · 17 sensor locations"

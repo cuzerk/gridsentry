@@ -1,5 +1,5 @@
 """
-GridSentry — Predictive Grid Maintenance Pipeline
+StormLines — Predictive Grid Maintenance Pipeline
 LangGraph multi-agent system for the Feb 23, 2026 New England Nor'easter.
 
 Three agents run as a deterministic StateGraph (no LLM calls required):
@@ -65,7 +65,7 @@ FEATURE_COLS = [
 
 
 # ── PIPELINE STATE ─────────────────────────────────────────────────────────────
-class GridSentryState(TypedDict):
+class StormLinesState(TypedDict):
     weather_data: dict          # {location_id: [hourly_row, ...]}
     outage_data:  dict          # {location_id: [hourly_row, ...]}
     predictions:  list          # flat list of prediction dicts for deck.gl
@@ -182,7 +182,7 @@ def _mock_weather(loc: dict) -> list[dict]:
     return rows
 
 
-def weather_aggregator_node(state: GridSentryState) -> dict:
+def weather_aggregator_node(state: StormLinesState) -> dict:
     """Agent 1: Fetch hourly meteorological data for all 17 study-area locations."""
     weather_data: dict = {}
     source_note: str   = "Open-Meteo archive API"
@@ -282,7 +282,7 @@ def _simulate_outage(loc: dict, weather_rows: list[dict]) -> list[dict]:
     return outage_rows
 
 
-def grid_archivist_node(state: GridSentryState) -> dict:
+def grid_archivist_node(state: StormLinesState) -> dict:
     """Agent 2: Generate realistic outage accumulation curves per location."""
     outage_data: dict  = {}
     location_map       = {loc["id"]: loc for loc in LOCATIONS}
@@ -386,7 +386,7 @@ def _build_training_data() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def predictive_analyst_node(state: GridSentryState) -> dict:
+def predictive_analyst_node(state: StormLinesState) -> dict:
     """Agent 3: Train Random Forest on historical storms, predict Feb 2026 probabilities."""
 
     # 3a — Training
@@ -469,7 +469,7 @@ def predictive_analyst_node(state: GridSentryState) -> dict:
 # DATA EXPORTER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def data_exporter_node(state: GridSentryState) -> dict:
+def data_exporter_node(state: StormLinesState) -> dict:
     """Write prediction_timeline.json in deck.gl-ready format."""
     output_path = state["output_path"]
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -505,7 +505,7 @@ def data_exporter_node(state: GridSentryState) -> dict:
 
 def build_pipeline():
     """Compile the four-node LangGraph pipeline."""
-    g = StateGraph(GridSentryState)
+    g = StateGraph(StormLinesState)
 
     g.add_node("weather_aggregator",  weather_aggregator_node)
     g.add_node("grid_archivist",      grid_archivist_node)

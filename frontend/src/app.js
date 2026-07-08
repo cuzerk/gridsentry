@@ -4,14 +4,14 @@ import {BitmapLayer, IconLayer, PathLayer} from 'deck.gl';
 import routes from '../../analysis/data/infrastructure/routes_from_api.json';
 import levels from '../../analysis/data/infrastructure/levels_from_api.json';
 
-// Precipitation color ramp (mm/hr) — violet/purple palette
+// Precipitation color ramp (mm/hr) — pink → vibrant purple → dark purple
 const PRECIP_COLOR_STOPS = [
-  { mm: 0,   rgb: [245, 243, 255], label: '0'       },
-  { mm: 1,   rgb: [221, 214, 254], label: '1 mm/hr' },
-  { mm: 3,   rgb: [167, 139, 250], label: '3'       },
-  { mm: 7,   rgb: [124, 58,  237], label: '7'       },
-  { mm: 15,  rgb: [91,  33,  182], label: '15'      },
-  { mm: 30,  rgb: [46,  16,  101], label: '30+'     },
+  { mm: 0,   rgb: [253, 207, 223], label: '0'       },
+  { mm: 1,   rgb: [244, 114, 182], label: '1 mm/hr' },
+  { mm: 3,   rgb: [219,  39, 119], label: '3'       },
+  { mm: 7,   rgb: [147,  51, 234], label: '7'       },
+  { mm: 15,  rgb: [88,   28, 135], label: '15'      },
+  { mm: 30,  rgb: [30,   10,  60], label: '30+'     },
 ];
 
 function precipToRgb(mm) {
@@ -28,13 +28,13 @@ function precipToRgb(mm) {
 
 // Wind speed color ramp (m/s) — shared by legend, BitmapLayer, and IconLayer
 const WIND_COLOR_STOPS = [
-  { ms: 0,  rgb: [30,  64,  175], label: '0'    },
-  { ms: 5,  rgb: [14,  165, 233], label: '5 m/s' },
-  { ms: 10, rgb: [6,   182, 212], label: '10'   },
-  { ms: 15, rgb: [163, 230, 53],  label: '15'   },
-  { ms: 20, rgb: [250, 204, 21],  label: '20'   },
-  { ms: 25, rgb: [249, 115, 22],  label: '25'   },
-  { ms: 30, rgb: [239, 68,  68],  label: '30+'  },
+  { ms: 0,  rgb: [0,   0,   128], label: '0'    },
+  { ms: 5,  rgb: [0,   0,   255], label: '5 m/s' },
+  { ms: 10, rgb: [0,   255, 255], label: '10'   },
+  { ms: 15, rgb: [0,   255,   0], label: '15'   },
+  { ms: 20, rgb: [255, 255,   0], label: '20'   },
+  { ms: 25, rgb: [255,   0,   0], label: '25'   },
+  { ms: 30, rgb: [128,   0,   0], label: '30+'  },
 ];
 
 function speedToRgb(speed) {
@@ -65,7 +65,7 @@ const ARROW_SVG_URL =
 mapboxgl.accessToken = process.env.MAPBOX_TOKEN;
 
 const LEVELS = {
-  0: { label: '< 69 kV',   color: '#4a6b67' },
+  0: { label: '< 69 kV',   color: '#86efac' },
   1: { label: '69 kV',     color: '#a3e635' },
   2: { label: '115 kV',    color: '#4ade80' },
   3: { label: '138 kV',    color: '#10b981' },
@@ -103,7 +103,7 @@ let filteredRouteFeatures = routeFeatures;
 // ── Map ───────────────────────────────────────────────────────────────────────
 const map = new mapboxgl.Map({
   container: 'map',
-  style: 'mapbox://styles/jacksonkoehler11/cmqs965gr002s01qohn60d8lh',
+  style: 'mapbox://styles/jacksonkoehler11/cmr3qw57400e801qta4sf9way',
   center: [-71.8, 42.5],
   zoom: 7,
 });
@@ -120,6 +120,7 @@ const $timestamp   = document.getElementById('radar-timestamp');
 const $stormName   = document.getElementById('radar-storm-name');
 const $windToggle    = document.getElementById('wind-toggle');
 const $windOpacity   = document.getElementById('wind-opacity');
+const $linesToggle   = document.getElementById('lines-toggle');
 const $precipToggle  = document.getElementById('precip-toggle');
 const $precipOpacity = document.getElementById('precip-opacity');
 
@@ -127,6 +128,7 @@ const $precipOpacity = document.getElementById('precip-opacity');
 let WIND_FRAMES      = [];
 let windCache        = {};
 let windVisible      = true;
+let linesVisible     = true;
 let windFrameIdx     = 0;
 let windFeatures     = [];
 let windArrowFeatures = [];
@@ -146,11 +148,20 @@ let precipBounds     = null;
 let elevated3D = false;
 
 // ── Outage state ──────────────────────────────────────────────────────────────
+// A county-level jump above this threshold in one 15-min step suggests a
+// transmission-level failure rather than accumulated distribution outages.
+// Distribution feeders: 200–2k customers; substations: 2k–8k; 138 kV+: 10k–100k+
+const TRANSMISSION_DELTA_THRESHOLD = 10_000;
+
 let OUTAGE_DATA      = null;
 let OUTAGE_FRAMES    = [];
 let outageFrameIdx   = 0;
-let activeOutageIds  = new Set();
+let activeOutageIds  = new Set();   // all lines, current-customers-based
+let majorOutageIds   = new Set();   // level ≥ 3 lines flagged by sudden delta
 let fipsToLines      = new Map();   // fips (number) → [routeId, ...]
+
+// Quick lookup: route string id → level (built after routeFeatures is ready)
+const routeLevelById = new Map(routeFeatures.map((r) => [String(r.id), r.level]));
 
 // ── Mercator helpers ──────────────────────────────────────────────────────────
 // The bitmap must be built in Mercator Y space so pixels align with the map
@@ -302,16 +313,19 @@ function buildWeatherLayers() {
 
 // ── Transmission line deck.gl layers ─────────────────────────────────────────
 function buildRouteLayers() {
+  if (!linesVisible) return [];
   return [
     new PathLayer({
       id: 'transmission-routes',
       data: filteredRouteFeatures,
       getPath: (d) => d.path.map(([lon, lat]) => [lon, lat, elevated3D ? (LEVEL_ALTITUDE[d.level] ?? 0) : 0]),
       getColor: (d) => {
-        if (activeOutageIds.has(String(d.id))) return [239, 68, 68, 242];
+        const sid = String(d.id);
+        if (d.level >= 3 && majorOutageIds.has(sid))  return [239, 68, 68, 242];
+        if (d.level  < 3 && activeOutageIds.has(sid)) return [239, 68, 68, 242];
         return [...hexToRgb(LEVELS[d.level]?.color ?? '#94a3b8'), 217];
       },
-      getWidth: (d) => [1.5, 2, 2.5, 3.2, 4.2, 5.5][d.level] ?? 1.5,
+      getWidth: (d) => [1.5, 1.8, 2.1, 2.5, 3.0, 3.6][d.level] ?? 1.5,
       widthUnits: 'pixels',
       widthMinPixels: 0.5,
       capRounded: true,
@@ -320,7 +334,7 @@ function buildRouteLayers() {
       parameters: { depthTest: false },
       updateTriggers: {
         getPath: [elevated3D],
-        getColor: [activeOutageIds],
+        getColor: [activeOutageIds, majorOutageIds],
       },
     }),
   ];
@@ -612,15 +626,39 @@ function applyOutageFrame(idx) {
   $timestamp.textContent = frame.label;
   $slider.value = String(idx);
 
-  const newActiveIds = new Set();
-  for (const { fips, customers } of frame.counties) {
-    const ids = fipsToLines.get(fips) ?? [];
-    const n = outageLineCount(customers, ids.length);
-    for (let i = 0; i < n && i < ids.length; i++) {
-      newActiveIds.add(String(ids[i]));
+  const prevFrame = idx > 0 ? OUTAGE_FRAMES[idx - 1] : null;
+  const prevCustomers = new Map();
+  if (prevFrame) {
+    for (const { fips, customers } of prevFrame.counties) {
+      prevCustomers.set(fips, customers);
     }
   }
+
+  const newActiveIds = new Set();
+  const newMajorIds  = new Set();
+
+  for (const { fips, customers } of frame.counties) {
+    const ids   = fipsToLines.get(fips) ?? [];
+    const delta = customers - (prevCustomers.get(fips) ?? 0);
+
+    // Lower-voltage lines (≤ 115 kV, levels 0–2): existing total-based logic
+    const n = outageLineCount(customers, ids.length);
+    for (let i = 0; i < n && i < ids.length; i++) {
+      const sid = String(ids[i]);
+      if ((routeLevelById.get(sid) ?? 0) <= 2) newActiveIds.add(sid);
+    }
+
+    // Transmission lines (> 115 kV, levels 3–5): only on sudden large jump
+    if (delta >= TRANSMISSION_DELTA_THRESHOLD) {
+      for (const id of ids) {
+        const sid = String(id);
+        if ((routeLevelById.get(sid) ?? 0) >= 3) newMajorIds.add(sid);
+      }
+    }
+  }
+
   activeOutageIds = newActiveIds;
+  majorOutageIds  = newMajorIds;
 
   if (deckOverlay) deckOverlay.setProps({ layers: buildAllLayers() });
 
@@ -720,6 +758,26 @@ function applyFilter() {
 }
 
 // ── Map load ──────────────────────────────────────────────────────────────────
+const SAVED_VIEWS = [
+  { center: [-76.0751, 39.7615], zoom: 4.5,  pitch: 23, bearing: 0  },
+  { center: [-71.8164, 42.304],  zoom: 6.47, pitch: 0,  bearing: 0  },
+  { center: [-71.8995, 42.6615], zoom: 6.84, pitch: 63, bearing: -7 },
+];
+
+document.querySelectorAll('.view-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const v = SAVED_VIEWS[Number(btn.dataset.view)];
+    if (v) map.flyTo({ ...v, duration: 1200, essential: true });
+  });
+});
+
+window.mapView = () => {
+  const c = map.getCenter();
+  const v = { center: [+c.lng.toFixed(4), +c.lat.toFixed(4)], zoom: +map.getZoom().toFixed(2), pitch: +map.getPitch().toFixed(1), bearing: +map.getBearing().toFixed(1) };
+  console.log(JSON.stringify(v));
+  return v;
+};
+
 map.on('load', () => {
   deckOverlay = new MapboxOverlay({ interleaved: false, layers: buildAllLayers() });
   map.addControl(deckOverlay);
@@ -737,6 +795,14 @@ map.on('load', () => {
     refreshLayers();
     const s = document.getElementById('wind-legend');
     if (s) s.style.opacity = windVisible ? '1' : '0.4';
+  });
+
+  $linesToggle.addEventListener('click', () => {
+    linesVisible = !linesVisible;
+    $linesToggle.classList.toggle('off', !linesVisible);
+    if (deckOverlay) deckOverlay.setProps({ layers: buildAllLayers() });
+    const s = document.getElementById('legend');
+    if (s) s.style.opacity = linesVisible ? '1' : '0.4';
   });
 
   $windOpacity.addEventListener('input', refreshLayers);

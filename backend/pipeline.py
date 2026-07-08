@@ -1,5 +1,5 @@
 """
-GridSentry — pipeline entry point.
+StormLines — pipeline entry point.
 
 Usage:
     cd backend
@@ -18,7 +18,7 @@ import time
 # Resolve backend package from any working directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from agents import GridSentryState, LOCATIONS, build_pipeline
+from agents import StormLinesState, LOCATIONS, build_pipeline
 
 _HERE        = os.path.dirname(os.path.abspath(__file__))
 _OUTPUT_PATH = os.path.join(_HERE, "..", "frontend", "data", "prediction_timeline.json")
@@ -26,13 +26,13 @@ _OUTPUT_PATH = os.path.join(_HERE, "..", "frontend", "data", "prediction_timelin
 
 def main() -> None:
     print("\n╔══════════════════════════════════════════════════════╗")
-    print("║          GridSentry — Predictive Maintenance         ║")
+    print("║          StormLines — Predictive Maintenance         ║")
     print("║        Feb 22-24, 2026  |  New England Nor'easter    ║")
     print("╚══════════════════════════════════════════════════════╝\n")
 
     pipeline = build_pipeline()
 
-    initial_state: GridSentryState = {
+    initial_state: StormLinesState = {
         "weather_data": {},
         "outage_data":  {},
         "predictions":  [],

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-wind_agent.py — Fetch, clean, store, and export wind data for GridSentry.
+wind_agent.py — Fetch, clean, store, and export wind data for StormLines.
 
 Usage:
   python wind_agent.py \\
@@ -338,7 +338,7 @@ def render_quiver(df: pd.DataFrame, timestamp: str, out_path: str) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="GridSentry wind data agent")
+    p = argparse.ArgumentParser(description="StormLines wind data agent")
     p.add_argument(
         "--bbox", required=True,
         help="lon_min,lat_min,lon_max,lat_max  e.g. -75,40.5,-68,45.5",

@@ -232,6 +232,33 @@ body {
   flex-shrink: 0;
 }
 
+#view-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.view-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #94a3b8;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.view-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #e2e8f0;
+}
+
 #radar-play {
   background: rgba(255, 255, 255, 0.12);
   border: none;
@@ -372,6 +399,32 @@ input[type='range']::-webkit-slider-thumb:hover {
 
 #wind-opacity {
   width: 64px;
+}
+
+/* ── Lines toggle ── */
+#lines-toggle {
+  background: rgba(134, 239, 172, 0.18);
+  border: 1px solid rgba(134, 239, 172, 0.35);
+  color: #86efac;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+#lines-toggle:hover {
+  background: rgba(134, 239, 172, 0.28);
+}
+
+#lines-toggle.off {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #64748b;
 }
 
 /* ── Precipitation controls ── */

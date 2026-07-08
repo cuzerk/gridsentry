@@ -3,72 +3,103 @@
 Fetch New England power line data from Overpass API and export in the
 same format as routes.json and levels.json.
 
-Outputs:
+Coverage: CT, RI, MA, NH, VT, ME — split into 4 bounding boxes so each
+query stays under Overpass server limits.
+
+Outputs (written to analysis/data/infrastructure/):
   routes_from_api.json  — list of line objects with simplified geometry
   levels_from_api.json  — dict mapping "way/{id}" -> voltage level (1-5)
 """
 
 import json
 import sys
+import time
 from pathlib import Path
 import requests
 import geopandas as gpd
 from shapely.geometry import LineString
 
-# Rhode Island, Massachusetts, and Connecticut bounding box
-# (south_lat, west_lon, north_lat, east_lon)
-BBOX = "40.95,-73.73,42.89,-69.86"
+# Four overlapping sub-regions that together cover all of New England.
+# Overlap of ~0.1° catches lines that cross region boundaries.
+BBOXES = {
+    "CT + RI":    "40.95,-73.73,42.10,-71.08",
+    "MA":         "41.20,-73.55,42.95,-69.80",
+    "VT + NH":    "42.65,-73.50,45.35,-70.55",
+    "ME":         "43.00,-71.15,47.50,-66.90",
+}
 
-# Primary endpoint + mirror fallbacks
 OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://lz4.overpass-api.de/api/interpreter",
 ]
 
-# Voltage (V) to display level and z-height used by deck.gl
+# Voltage (V) → (display level, z-height for deck.gl)
 VOLTAGE_LEVELS = [
     (345_000, 5, 400),
     (230_000, 4, 300),
     (138_000, 3, 200),
     (115_000, 2, 100),
-    (  69_000, 1,   0),
+    ( 69_000, 1,   0),
 ]
 
-# Simplification tolerance in meters (Web Mercator / EPSG:3857).
-# 10 m keeps near-lossless detail; raise to 25-50 for smaller files.
-SIMPLIFY_TOLERANCE = 10
+SIMPLIFY_TOLERANCE = 10  # metres (EPSG:3857)
+
+# Lines to exclude — matched against lowercased name or operator
+EXCLUDE_NAME_KEYWORDS = ["sunrise wind", "south fork wind", "revolution wind"]
+EXCLUDE_OPERATORS     = {"long island power authority"}
 
 
-def fetch_overpass(bbox: str) -> dict:
-    query = f"""
+def build_query(bbox: str) -> str:
+    return f"""
 [out:json][timeout:180][maxsize:536870912];
 (
   way["power"="line"]({bbox});
   way["power"="minor_line"]({bbox});
+  way["power"="cable"]({bbox});
+  way["power"="line"]["voltage"~"^(2|4|13|23|34|41)[0-9]{{3}}$"]({bbox});
 );
 out geom;
 """
-    headers = {"User-Agent": "gridsentry/1.0 (power line data pipeline)"}
+
+
+def fetch_overpass(bbox: str, label: str) -> list:
+    """Fetch elements for one bbox, trying each endpoint in turn."""
+    query = build_query(bbox)
+    headers = {"User-Agent": "stormlines/1.0 (power line data pipeline)"}
     for url in OVERPASS_ENDPOINTS:
-        print(f"Fetching from {url} …", flush=True)
+        print(f"  [{label}] fetching from {url} …", flush=True)
         try:
             resp = requests.post(url, data={"data": query}, headers=headers, timeout=240)
             if resp.status_code == 200:
-                return resp.json()
-            print(f"  Got {resp.status_code}, trying next endpoint …")
+                elements = resp.json().get("elements", [])
+                print(f"  [{label}] {len(elements)} elements received")
+                return elements
+            print(f"  [{label}] got {resp.status_code}, trying next endpoint …")
         except requests.exceptions.RequestException as e:
-            print(f"  {type(e).__name__}, trying next endpoint …")
-    raise RuntimeError("All Overpass endpoints failed or timed out.")
+            print(f"  [{label}] {type(e).__name__}, trying next endpoint …")
+    raise RuntimeError(f"All endpoints failed for region '{label}'.")
+
+
+def fetch_all_regions() -> list:
+    """Fetch all regions and deduplicate by OSM element id."""
+    seen: dict[int, dict] = {}
+    for label, bbox in BBOXES.items():
+        elements = fetch_overpass(bbox, label)
+        for el in elements:
+            seen.setdefault(el["id"], el)
+        # Brief pause between requests to be polite to the API
+        time.sleep(2)
+    print(f"\nTotal unique elements after dedup: {len(seen)}")
+    return list(seen.values())
 
 
 def parse_voltage(raw) -> int | None:
     """Return the highest numeric voltage from a tag like '345000;115000'."""
     if not raw or not isinstance(raw, str):
         return None
-    parts = raw.replace(";", " ").replace(",", " ").split()
     nums = []
-    for p in parts:
+    for p in raw.replace(";", " ").replace(",", " ").split():
         try:
             nums.append(int(p))
         except ValueError:
@@ -76,15 +107,22 @@ def parse_voltage(raw) -> int | None:
     return max(nums) if nums else None
 
 
-def voltage_to_level(volts: int | None) -> tuple[int, int] | None:
-    """Return (level, z) for a voltage value, or None if unrecognised."""
-    if volts is None:
-        return None
-    for threshold, level, z in VOLTAGE_LEVELS:
-        if volts >= threshold:
-            return level, z
-    # Anything below 69 kV — treat as level 1
-    return 1, 0
+def voltage_to_level(volts: int | None, power_type: str) -> tuple[int, int]:
+    """
+    Return (level, z) for a way.
+    Minor lines and cables without a voltage tag default to level 1.
+    Transmission lines (power=line) without voltage are skipped (returns None).
+    """
+    if volts is not None:
+        for threshold, level, z in VOLTAGE_LEVELS:
+            if volts >= threshold:
+                return level, z
+        return 1, 0  # below 69 kV → lowest tier
+
+    # No voltage tag
+    if power_type in ("minor_line", "cable"):
+        return 1, 0
+    return None  # power=line with no voltage — skip
 
 
 def build_features(elements: list) -> list[dict]:
@@ -104,7 +142,7 @@ def build_features(elements: list) -> list[dict]:
                 "number": tags.get("ref") or tags.get("ref:line") or "",
                 "name": tags.get("name") or "",
                 "operator": tags.get("operator") or "",
-                "power": tags.get("power", ""),
+                "power": tags.get("power", "line"),
             }
         )
     return features
@@ -116,8 +154,7 @@ def simplify_geometries(features: list[dict]) -> list[dict]:
     gdf_m["geometry"] = gdf_m["geometry"].simplify(
         tolerance=SIMPLIFY_TOLERANCE, preserve_topology=True
     )
-    gdf_wgs84 = gdf_m.to_crs(epsg=4326)
-    return gdf_wgs84.to_dict("records")
+    return gdf_m.to_crs(epsg=4326).to_dict("records")
 
 
 def build_outputs(simplified: list[dict]) -> tuple[list, dict]:
@@ -127,25 +164,23 @@ def build_outputs(simplified: list[dict]) -> tuple[list, dict]:
     for row in simplified:
         osm_id = f"way/{row['id']}"
         volts = parse_voltage(row["voltage_raw"])
-        lv_z = voltage_to_level(volts)
+        lv_z = voltage_to_level(volts, row["power"])
         if lv_z is None:
-            continue  # skip lines with no recognisable voltage
+            continue
 
         level, z = lv_z
-
-        # Extract coordinate list; round to 4 decimal places (~11 m precision)
         geom = row["geometry"]
         if geom is None or geom.is_empty:
             continue
-        path = [[round(x, 4), round(y, 4), z] for x, y in geom.coords]
 
+        path = [[round(x, 4), round(y, 4), z] for x, y in geom.coords]
         routes.append(
             {
                 "id": osm_id,
                 "level": level,
                 "number": str(row["number"]),
                 "name": str(row["name"]),
-                "voltage": str(volts),
+                "voltage": str(volts) if volts else "",
                 "operator": str(row["operator"]),
                 "path": path,
             }
@@ -156,9 +191,7 @@ def build_outputs(simplified: list[dict]) -> tuple[list, dict]:
 
 
 def main() -> None:
-    data = fetch_overpass(BBOX)
-    elements = data.get("elements", [])
-    print(f"Elements received: {len(elements)}")
+    elements = fetch_all_regions()
 
     features = build_features(elements)
     print(f"Valid line features: {len(features)}")
@@ -166,7 +199,7 @@ def main() -> None:
     simplified = simplify_geometries(features)
 
     routes, levels = build_outputs(simplified)
-    print(f"Lines with recognised voltage: {len(routes)}")
+    print(f"Lines written: {len(routes)}")
 
     out_dir = Path(__file__).parent / "analysis" / "data" / "infrastructure"
     out_dir.mkdir(parents=True, exist_ok=True)
