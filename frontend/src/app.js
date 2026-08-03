@@ -1,8 +1,19 @@
 import mapboxgl from 'mapbox-gl';
 import {MapboxOverlay} from '@deck.gl/mapbox';
 import {BitmapLayer, IconLayer, PathLayer} from 'deck.gl';
-import routes from '../../analysis/data/infrastructure/routes_from_api.json';
-import levels from '../../analysis/data/infrastructure/levels_from_api.json';
+import {createRequest, pollRequest, requestDataUrl, infraDataUrl} from './api.js';
+import {initAreaPicker} from './areaPicker.js';
+
+// Boot request — reproduces the original hardcoded Oct 2021 New England
+// storm as the default view. Every subsequent pick goes through the exact
+// same runRequest() path; there is no separate "static demo data" code path.
+const DEFAULT_BBOX  = [-73.73, 40.95, -66.90, 47.50];
+const DEFAULT_START = '2021-10-27';
+const DEFAULT_END   = '2021-10-29';
+
+// Set once a request becomes ready; every data loader below reads from these.
+let currentRequestId = null;
+let currentAreaHash  = null;
 
 // Precipitation color ramp (mm/hr) — pink → vibrant purple → dark purple
 const PRECIP_COLOR_STOPS = [
@@ -83,29 +94,19 @@ const LEVEL_ALTITUDE = (() => {
   return Object.fromEntries(kv.map((v, i) => [i, Math.round((Math.log10(v) - lo) / (hi - lo) * 6000)]));
 })();
 
-// Pre-build route features with level-split logic applied
-const routeFeatures = routes.map((route) => {
-  const assignedLevel = levels[route.id] ?? route.level;
-  const primaryVolt   = parseInt((route.voltage ?? '0').split(';')[0], 10);
-  const displayLevel  = (assignedLevel === 1 && primaryVolt > 0 && primaryVolt < 69000) ? 0 : assignedLevel;
-  return {
-    id: route.id,
-    level: displayLevel,
-    name: route.name,
-    voltage: route.voltage,
-    operator: route.operator,
-    number: route.number,
-    path: route.path,
-  };
-});
-let filteredRouteFeatures = routeFeatures;
+// Route features are loaded per-request now (transmission lines vary by
+// picked area) — populated by setInfraData() once the active request's
+// infrastructure data arrives.
+let routeFeatures = [];
+let filteredRouteFeatures = [];
+let routeLevelById = new Map();  // route string id -> level; rebuilt per request
 
 // ── Map ───────────────────────────────────────────────────────────────────────
 const map = new mapboxgl.Map({
   container: 'map',
   style: 'mapbox://styles/jacksonkoehler11/cmr3qw57400e801qta4sf9way',
-  center: [-71.8, 42.5],
-  zoom: 7,
+  center: [-98.0, 39.5],
+  zoom: 3.2,
 });
 
 map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
@@ -159,9 +160,6 @@ let outageFrameIdx   = 0;
 let activeOutageIds  = new Set();   // all lines, current-customers-based
 let majorOutageIds   = new Set();   // level ≥ 3 lines flagged by sudden delta
 let fipsToLines      = new Map();   // fips (number) → [routeId, ...]
-
-// Quick lookup: route string id → level (built after routeFeatures is ready)
-const routeLevelById = new Map(routeFeatures.map((r) => [String(r.id), r.level]));
 
 // ── Mercator helpers ──────────────────────────────────────────────────────────
 // The bitmap must be built in Mercator Y space so pixels align with the map
@@ -349,7 +347,7 @@ async function loadWindFrame(idx) {
   if (!WIND_FRAMES.length) return;
   const frame = WIND_FRAMES[idx];
   if (!frame) return;
-  const url = `./data/wind/${frame.file}`;
+  const url = requestDataUrl(currentRequestId, `wind/${frame.file}`);
   if (!windCache[url]) {
     const resp = await fetch(url);
     windCache[url] = await resp.json();
@@ -361,16 +359,19 @@ async function loadWindFrame(idx) {
 }
 
 async function loadWindManifest() {
+  windCache = {};
   try {
-    const resp = await fetch('./data/wind/manifest.json');
+    const resp = await fetch(requestDataUrl(currentRequestId, 'wind/manifest.json'));
     if (!resp.ok) return;
     const mf = await resp.json();
     WIND_FRAMES = mf.frames;
+    $windToggle.style.display = '';
+    document.getElementById('wind-opacity-label').style.display = '';
     addWindLegend();
     // Load first frame as a static backdrop — slider is owned by outage data
     await loadWindFrame(0);
   } catch (e) {
-    console.warn('Wind: no manifest — run wind_agent.py first', e);
+    console.warn('Wind: no manifest for this request', e);
     $windToggle.style.display  = 'none';
     document.getElementById('wind-opacity-label').style.display = 'none';
   }
@@ -452,7 +453,7 @@ async function loadPrecipFrame(idx) {
   if (!PRECIP_FRAMES.length) return;
   const frame = PRECIP_FRAMES[idx];
   if (!frame) return;
-  const url = `./data/precip/${frame.file}`;
+  const url = requestDataUrl(currentRequestId, `precip/${frame.file}`);
   if (!precipCache[url]) {
     const resp = await fetch(url);
     precipCache[url] = await resp.json();
@@ -462,21 +463,25 @@ async function loadPrecipFrame(idx) {
 }
 
 async function loadPrecipManifest() {
+  precipCache = {};
   try {
-    const resp = await fetch('./data/precip/manifest.json');
+    const resp = await fetch(requestDataUrl(currentRequestId, 'precip/manifest.json'));
     if (!resp.ok) return;
     const mf = await resp.json();
     PRECIP_FRAMES = mf.frames;
+    $precipToggle.style.display = '';
+    document.getElementById('precip-opacity-label').style.display = '';
     addPrecipLegend();
     await loadPrecipFrame(0);
   } catch (e) {
-    console.warn('Precip: no manifest — run precip_agent.py first', e);
+    console.warn('Precip: no manifest for this request', e);
     $precipToggle.style.display       = 'none';
     document.getElementById('precip-opacity-label').style.display = 'none';
   }
 }
 
 function addPrecipLegend() {
+  document.getElementById('precip-legend')?.remove();
   const section = document.createElement('div');
   section.id = 'precip-legend';
   section.innerHTML =
@@ -491,6 +496,7 @@ function addPrecipLegend() {
 }
 
 function addWindLegend() {
+  document.getElementById('wind-legend')?.remove();
   const section = document.createElement('div');
   section.id = 'wind-legend';
   section.innerHTML =
@@ -665,18 +671,21 @@ function applyOutageFrame(idx) {
   const totalCustomers = frame.counties.reduce((s, c) => s + c.customers, 0);
   if (totalCustomers > 0) {
     $stats.textContent =
-      `${routes.length.toLocaleString()} lines · ` +
+      `${routeFeatures.length.toLocaleString()} lines · ` +
       `${activeOutageIds.size.toLocaleString()} down · ` +
       `${totalCustomers.toLocaleString()} customers affected`;
   } else {
-    $stats.textContent = `${routes.length.toLocaleString()} transmission lines · No active outages`;
+    $stats.textContent = `${routeFeatures.length.toLocaleString()} transmission lines · No active outages`;
   }
   drawCustomersChart(idx);
 }
 
 async function loadOutageData() {
+  fipsToLines     = new Map();
+  activeOutageIds = new Set();
+  majorOutageIds  = new Set();
   try {
-    const resp = await fetch('./data/outages/storm_oct2021.json');
+    const resp = await fetch(requestDataUrl(currentRequestId, 'outages.json'));
     if (!resp.ok) return;
     OUTAGE_DATA   = await resp.json();
     OUTAGE_FRAMES = OUTAGE_DATA.frames;
@@ -697,6 +706,7 @@ async function loadOutageData() {
 }
 
 function addOutageLegend() {
+  document.getElementById('outage-legend')?.remove();
   const section = document.createElement('div');
   section.id = 'outage-legend';
   section.innerHTML =
@@ -705,6 +715,24 @@ function addOutageLegend() {
       <span class="legend-swatch" style="background:#ef4444"></span>
       <span>Line down (scaled to customers out)</span>
     </div>`;
+  $legend.appendChild(section);
+}
+
+// ── Agent reasoning (bottom of legend) ───────────────────────────────────────
+function addExplanationSection(explanation, warnings) {
+  document.getElementById('explanation-legend')?.remove();
+  if (!explanation) return;
+  const section = document.createElement('div');
+  section.id = 'explanation-legend';
+  const warningsHtml = (warnings && warnings.length)
+    ? `<div id="explanation-warnings">${
+        warnings.map((w) => `<span class="warning-badge">${w.replace(/_/g, ' ')}</span>`).join('')
+      }</div>`
+    : '';
+  section.innerHTML =
+    '<h2 style="margin-top:14px">Agent Notes</h2>' +
+    `<p id="explanation-text">${explanation}</p>` +
+    warningsHtml;
   $legend.appendChild(section);
 }
 
@@ -757,18 +785,110 @@ function applyFilter() {
   if (map.getLayer('routes-hit')) map.setFilter('routes-hit', visibleFilter());
 }
 
-// ── Map load ──────────────────────────────────────────────────────────────────
-const SAVED_VIEWS = [
-  { center: [-76.0751, 39.7615], zoom: 4.5,  pitch: 23, bearing: 0  },
-  { center: [-71.8164, 42.304],  zoom: 6.47, pitch: 0,  bearing: 0  },
-  { center: [-71.8995, 42.6615], zoom: 6.84, pitch: 63, bearing: -7 },
-];
-
-document.querySelectorAll('.view-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const v = SAVED_VIEWS[Number(btn.dataset.view)];
-    if (v) map.flyTo({ ...v, duration: 1200, essential: true });
+// ── Transmission line data (varies per picked area) ──────────────────────────
+function setInfraData(routesRaw, levelsRaw) {
+  routeFeatures = routesRaw.map((route) => {
+    const assignedLevel = levelsRaw[route.id] ?? route.level;
+    const primaryVolt   = parseInt((route.voltage ?? '0').split(';')[0], 10);
+    const displayLevel  = (assignedLevel === 1 && primaryVolt > 0 && primaryVolt < 69000) ? 0 : assignedLevel;
+    return {
+      id: route.id,
+      level: displayLevel,
+      name: route.name,
+      voltage: route.voltage,
+      operator: route.operator,
+      number: route.number,
+      path: route.path,
+    };
   });
+  routeLevelById = new Map(routeFeatures.map((r) => [String(r.id), r.level]));
+  applyFilter();
+
+  if (map.getSource('routes')) {
+    map.getSource('routes').setData({
+      type: 'FeatureCollection',
+      features: routeFeatures.map((rf) => ({
+        type: 'Feature',
+        id: rf.id,
+        properties: { id: rf.id, level: rf.level, name: rf.name, voltage: rf.voltage, operator: rf.operator, number: rf.number },
+        geometry: { type: 'LineString', coordinates: rf.path.map(([lon, lat]) => [lon, lat]) },
+      })),
+    });
+  }
+  $stats.textContent = `${routeFeatures.length.toLocaleString()} transmission lines`;
+}
+
+function fitMapToBbox(bbox) {
+  const [w, s, e, n] = bbox;
+  map.fitBounds([[w, s], [e, n]], { padding: 60, duration: 1000 });
+}
+
+// ── Request lifecycle: bbox + date range -> loaded layers ───────────────────
+async function loadRequestData(requestId, areaHash) {
+  currentRequestId = requestId;
+  currentAreaHash  = areaHash;
+
+  const [routesRaw, levelsRaw] = await Promise.all([
+    fetch(infraDataUrl(areaHash, 'routes_from_api.json')).then((r) => r.json()),
+    fetch(infraDataUrl(areaHash, 'levels_from_api.json')).then((r) => r.json()),
+  ]);
+  setInfraData(routesRaw, levelsRaw);
+
+  await Promise.all([loadOutageData(), loadWindManifest(), loadPrecipManifest()]);
+}
+
+const STATUS_LABELS = {
+  pending:            'Requesting…',
+  fetching_infra:     'Fetching transmission lines…',
+  checking_coverage:  'Checking historical data coverage…',
+  fetching_outages:   'Building outage timeline…',
+  fetching_weather:   'Fetching wind & precipitation…',
+};
+
+// Guards against overlapping requests: if the user (or the boot request)
+// fires a new pick while an older one is still in flight, the older one's
+// late-arriving response must not clobber the newer one's state.
+let requestGeneration = 0;
+
+async function runRequest(bbox, start, end) {
+  const myGeneration = ++requestGeneration;
+  const stillCurrent = () => myGeneration === requestGeneration;
+
+  areaPicker.setStatus('Requesting…');
+  areaPicker.setBusy(true);
+  try {
+    const { request_id } = await createRequest(bbox, start, end);
+    const result = await pollRequest(request_id, {
+      onStatus: (d) => stillCurrent() && areaPicker.setStatus(STATUS_LABELS[d.status] ?? d.status),
+    });
+    if (!stillCurrent()) return;
+    if (result.status === 'failed') {
+      areaPicker.setStatus(`Error: ${result.error}`);
+      addExplanationSection(null);
+      return;
+    }
+    await loadRequestData(request_id, result.meta.area_hash);
+    if (!stillCurrent()) return;
+    // Fit to the wider weather-fetch bbox (not just the picked area) so an
+    // approaching storm is visible moving into frame, not just the outage/lines
+    // region itself.
+    fitMapToBbox(result.meta.weather_bbox ?? bbox);
+    addExplanationSection(result.meta.explanation, result.meta.warnings);
+    areaPicker.setStatus('');
+  } catch (e) {
+    console.error(e);
+    if (stillCurrent()) areaPicker.setStatus('Request failed — is the backend server running?');
+  } finally {
+    if (stillCurrent()) areaPicker.setBusy(false);
+  }
+}
+
+// ── Map load ──────────────────────────────────────────────────────────────────
+const areaPicker = initAreaPicker(map, {
+  onSubmit: runRequest,
+  defaultBbox: DEFAULT_BBOX,
+  defaultStart: DEFAULT_START,
+  defaultEnd: DEFAULT_END,
 });
 
 window.mapView = () => {
@@ -781,9 +901,6 @@ window.mapView = () => {
 map.on('load', () => {
   deckOverlay = new MapboxOverlay({ interleaved: false, layers: buildAllLayers() });
   map.addControl(deckOverlay);
-
-  loadWindManifest();
-  loadPrecipManifest();
 
   function refreshLayers() {
     if (deckOverlay) deckOverlay.setProps({ layers: buildAllLayers() });
@@ -828,19 +945,7 @@ map.on('load', () => {
     paint: { 'line-width': 16, 'line-opacity': 0 },
   });
 
-  map.getSource('routes').setData({
-    type: 'FeatureCollection',
-    features: routeFeatures.map((rf) => ({
-      type: 'Feature',
-      id: rf.id,
-      properties: { id: rf.id, level: rf.level, name: rf.name, voltage: rf.voltage, operator: rf.operator, number: rf.number },
-      geometry: { type: 'LineString', coordinates: rf.path.map(([lon, lat]) => [lon, lat]) },
-    })),
-  });
-
-  $stats.textContent = `${routes.length.toLocaleString()} transmission lines`;
-
-  loadOutageData();
+  runRequest(DEFAULT_BBOX, DEFAULT_START, DEFAULT_END);
 
   // ── Route hover tooltip ───────────────────────────────────────────────────
   map.on('mousemove', 'routes-hit', (e) => {

@@ -127,6 +127,31 @@ body {
   border-radius: 2px;
 }
 
+#explanation-text {
+  margin: 0 0 6px;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: #475569;
+}
+
+#explanation-warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.warning-badge {
+  font-size: 0.64rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #b45309;
+  background: rgba(217, 119, 6, 0.12);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+
 /* ── Stats ── */
 #stats {
   padding-top: 12px;
@@ -232,13 +257,14 @@ body {
   flex-shrink: 0;
 }
 
-#view-buttons {
+#area-picker {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
-.view-btn {
+#draw-area-btn,
+#go-btn {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #94a3b8;
@@ -253,10 +279,37 @@ body {
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.view-btn:hover {
+#draw-area-btn:hover,
+#go-btn:hover {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.28);
   color: #e2e8f0;
+}
+
+#draw-area-btn.active {
+  background: rgba(74, 222, 128, 0.22);
+  border-color: rgba(74, 222, 128, 0.4);
+  color: #86efac;
+}
+
+#date-start,
+#date-end {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #e2e8f0;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  color-scheme: dark;
+}
+
+#area-status {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #radar-play {

@@ -337,6 +337,23 @@ def render_quiver(df: pd.DataFrame, timestamp: str, out_path: str) -> str:
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+def run(
+    bbox: tuple, start: str, end: str, out_dir: str,
+    spacing: float = 0.5, upsample: int = 4, parquet_path: str | None = None,
+) -> dict:
+    """Fetch + clean + export wind frames for one bbox/date-range request.
+    Importable entry point for the orchestrator — same pipeline as main(), no
+    subprocess/CLI needed."""
+    raw = fetch_wind_grid(bbox, start, end, spacing)
+    df = clean_wind(raw)
+
+    if parquet_path:
+        store_wind(df, parquet_path)
+
+    dense = interpolate_grid(df, upsample)
+    return export_geojson_frames(dense, out_dir)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="StormLines wind data agent")
     p.add_argument(
@@ -371,27 +388,13 @@ def main() -> None:
     if len(bbox) != 4:
         p.error("--bbox must have exactly 4 comma-separated values")
 
-    # 1 — Fetch
-    raw = fetch_wind_grid(bbox, args.start, args.end, args.spacing)
+    manifest = run(bbox, args.start, args.end, args.out, args.spacing, args.upsample, args.parquet)
+    print(f"\nExported {len(manifest.get('frames', []))} frames → {args.out}")
 
-    # 2 — Clean
-    print("\nCleaning…")
-    df = clean_wind(raw)
-    print(f"  {len(df):,} valid observations across {df['time'].nunique()} hours")
-
-    # 3 — Store (original-resolution data, not the upsampled visualization grid)
-    print("\nStoring…")
-    store_wind(df, args.parquet)
-
-    # 4 — Upsample for continuous heatmap coverage, then export GeoJSON frames
-    print("\nInterpolating…")
-    dense = interpolate_grid(df, args.upsample)
-
-    print("\nExporting frames…")
-    export_geojson_frames(dense, args.out)
-
-    # 5 — Optional static quiver
+    # Optional static quiver (re-fetch+clean at original resolution for the render)
     if args.render:
+        raw = fetch_wind_grid(bbox, args.start, args.end, args.spacing)
+        df = clean_wind(raw)
         print(f"\nRendering quiver for {args.render}…")
         png = str(Path(args.parquet).parent / f"quiver_{args.render[:10]}.png")
         render_quiver(df, args.render, png)

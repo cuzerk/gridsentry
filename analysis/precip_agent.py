@@ -137,6 +137,18 @@ def export_precip_frames(df: pd.DataFrame, out_dir: str) -> dict:
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+def run(bbox: tuple, start: str, end: str, out_dir: str, spacing: float = 0.25, parquet_path: str | None = None) -> dict:
+    """Fetch + export precip frames for one bbox/date-range request. Returns the manifest dict.
+    Importable entry point for the orchestrator — same pipeline as main(), no subprocess/CLI needed."""
+    df = fetch_precip_grid(bbox, start, end, spacing)
+
+    if parquet_path:
+        Path(parquet_path).parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(parquet_path, index=False)
+
+    return export_precip_frames(df, out_dir)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="StormLines precipitation data agent")
     p.add_argument("--bbox",    required=True,
@@ -160,16 +172,10 @@ def main() -> None:
     if len(bbox) != 4:
         p.error("--bbox must have exactly 4 comma-separated values")
 
-    df = fetch_precip_grid(bbox, args.start, args.end, args.spacing)
-
-    print("Storing parquet…")
-    Path(args.parquet).parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(args.parquet, index=False)
-    size_kb = Path(args.parquet).stat().st_size // 1024
-    print(f"  → {args.parquet} ({size_kb} KB)")
-
-    print("Exporting GeoJSON frames…")
-    export_precip_frames(df, args.out)
+    print("Fetching…")
+    manifest = run(bbox, args.start, args.end, args.out, args.spacing, args.parquet)
+    print(f"  → {args.parquet}")
+    print(f"Exported {len(manifest.get('frames', []))} frames → {args.out}")
     print("Done.")
 
 
